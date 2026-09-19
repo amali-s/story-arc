@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Story Arc</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <h1>Story Arc</h1>
+    <p class="sub">A character's journey through a story. Code splits the story into segments and plots them; TypeSafe System One answers narrow, typed questions about each segment.</p>
+  </header>
+
+  <main class="layout">
+    <form id="form" class="panel input-panel">
+      <label for="character">Character to track</label>
+      <input id="character" name="character" type="text" autocomplete="off" required placeholder="e.g. Mara" />
+
+      <label for="story">Story text</label>
+      <textarea id="story" name="story" required placeholder="Paste a story. Paragraphs become points on the chart."></textarea>
+
+      <div class="actions">
+        <button type="button" id="sample" class="secondary">Load sample story</button>
+        <button type="submit" id="analyze">Analyze</button>
+      </div>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </form>
+
+    <section class="panel chart-panel" aria-label="Journey chart">
+      <div class="chart-head">
+        <h2 id="chart-title">Journey</h2>
+        <span id="meta" class="meta"></span>
+      </div>
+      <div id="chart" class="chart">
+        <p class="empty">Load the sample story or paste your own, then click Analyze.</p>
+      </div>
+      <ul class="legend" id="legend">
+        <li><span class="glyph glyph-height" aria-hidden="true"></span>Height = action intensity</li>
+        <li><span class="glyph glyph-colors" aria-hidden="true">
+          <i data-feeling="joy"></i><i data-feeling="rage"></i><i data-feeling="despair"></i><i data-feeling="relief"></i>
+        </span>Color = the feeling TypeSafe reads in the narration
+          <span class="feeling-keys">
+            <span><i data-feeling="joy"></i>joy</span>
+            <span><i data-feeling="rage"></i>rage</span>
+            <span><i data-feeling="despair"></i>despair</span>
+            <span><i data-feeling="relief"></i>relief</span>
+          </span>
+        </li>
+        <li><span class="glyph glyph-bright" aria-hidden="true"><i></i><i></i></span>Brightness = how sure it is</li>
+        <li><span class="glyph glyph-dash" aria-hidden="true"></span>Dashed = uncertain intensity</li>
+        <li><span class="glyph glyph-faded" aria-hidden="true"></span>Faded = character offstage</li>
+      </ul>
+    </section>
+  </main>
+
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+
+  <script src="/static/sample.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

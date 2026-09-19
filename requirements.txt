@@ -1,0 +1,4 @@
+typesafe-sdk>=0.7,<0.8
+fastapi
+uvicorn[standard]
+python-dotenv
