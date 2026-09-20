@@ -9,31 +9,53 @@
 <body>
   <header class="site-header">
     <h1>Story Arc</h1>
-    <p class="sub">A character's journey through a story. Code splits the story into segments and plots them; TypeSafe System One answers narrow, typed questions about each segment.</p>
+    <p class="sub">Name a story, book, film, or folk tale. Code searches Wikipedia, pulls the plot summary, counts the names in it and splits it into segments; TypeSafe System One answers narrow, typed questions about each segment for each of the three main characters.</p>
   </header>
 
   <main class="layout">
-    <form id="form" class="panel input-panel">
-      <label for="character">Character to track</label>
-      <input id="character" name="character" type="text" autocomplete="off" required placeholder="e.g. Mara" />
-
-      <label for="story">Story text</label>
-      <textarea id="story" name="story" required placeholder="Paste a story. Paragraphs become points on the chart."></textarea>
-
-      <div class="actions">
-        <button type="button" id="sample" class="secondary">Load sample story</button>
-        <button type="submit" id="analyze">Analyze</button>
+    <section class="panel input-panel" aria-label="Story input">
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" id="tab-search" aria-controls="pane-search" aria-selected="true">Find a story</button>
+        <button type="button" role="tab" id="tab-text" aria-controls="pane-text" aria-selected="false">Paste text</button>
       </div>
+
+      <div id="pane-search" role="tabpanel" aria-labelledby="tab-search">
+        <form id="search-form">
+          <label for="query">Story, book, film, sonnet, or folk tale</label>
+          <div class="search-row">
+            <input id="query" name="query" type="search" autocomplete="off" required placeholder="e.g. The Great Gatsby" />
+            <button type="submit" id="search-btn">Search</button>
+          </div>
+        </form>
+        <p class="hint">Pick the right article: a novel and its film adaptation are separate pages with different plot summaries.</p>
+        <ul id="results" class="results"></ul>
+      </div>
+
+      <div id="pane-text" role="tabpanel" aria-labelledby="tab-text" hidden>
+        <label for="title">Title (optional)</label>
+        <input id="title" name="title" type="text" autocomplete="off" placeholder="e.g. The Keeper of Kell" />
+        <label for="story">Story text</label>
+        <textarea id="story" name="story" placeholder="Paste a story. Paragraphs become points on the chart."></textarea>
+        <div class="actions">
+          <button type="button" id="sample" class="secondary">Load sample story</button>
+          <button type="button" id="analyze">Analyze</button>
+        </div>
+      </div>
+
+      <ol id="stages" class="stages"></ol>
       <p id="status" class="status" role="status" aria-live="polite"></p>
-    </form>
+    </section>
 
     <section class="panel chart-panel" aria-label="Journey chart">
       <div class="chart-head">
         <h2 id="chart-title">Journey</h2>
         <span id="meta" class="meta"></span>
       </div>
+      <p id="source" class="source" hidden></p>
+      <div id="toggle" class="toggle" role="group" aria-label="Character to show" hidden></div>
+      <p id="note" class="note-line" hidden></p>
       <div id="chart" class="chart">
-        <p class="empty">Load the sample story or paste your own, then click Analyze.</p>
+        <p class="empty">Search for a story, or switch to <strong>Paste text</strong> and load the sample.</p>
       </div>
       <ul class="legend" id="legend">
         <li><span class="glyph glyph-height" aria-hidden="true"></span>Height = action intensity</li>

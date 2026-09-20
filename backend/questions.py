@@ -1,15 +1,36 @@
-"""The narrow, typed questions System One answers about each story segment.
+"""The narrow, typed questions System One answers.
 
-State shape sent with every request (see `build_state`):
+Two request shapes, both built here.
+
+1. Character confirmation, one request per story (`candidate_questions`):
 
     {
-      "character": {"name": ...},
+      "story": {"title": ..., "plot": ...},
+      "candidates": [{"name": ..., "mentions": n}, ...]
+    }
+
+   Two Nouls per candidate, all in one request so they run in parallel.
+   `candidates[i].mentions` is in the state as context but no question ever
+   refers to it: jev-1.13 is documented as poor at counting and numeric
+   comparison, so code does the counting and the ranking arithmetic.
+
+2. Journey analysis, one request per segment covering every character
+   (`segment_questions`):
+
+    {
+      "characters": [{"name": ...}, ...],
       "segment": {"index": i, "text": ...},
       "context": {"previous_segment": ...}
     }
 
+   Five questions are asked once per segment because they are about the
+   narration, not about anyone in particular. Three are asked per character,
+   suffixed _0/_1/_2.
+
 Question ids are for code only; the model never sees them, so every
 instruction carries its full meaning and references state by backticked path.
+The `characters[0].name` / `candidates[0].name` syntax is the documented way
+to point at an element of a state array.
 """
 
 from __future__ import annotations
@@ -23,25 +44,73 @@ FEELINGS = ("joy", "rage", "despair", "relief")
 ACTION_LEVELS = 5
 
 
-def build_state(character: str, index: int, text: str, previous: str) -> dict:
+def questions_fingerprint(questions: dict) -> str:
+    """Stable hash of question definitions, used as part of the cache key."""
+    payload = {k: q.model_dump(mode="json") for k, q in sorted(questions.items())}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+
+
+# ---------------------------------------------------------------------------
+# 1. Character confirmation: "jev confirms" what "code counts" proposed
+# ---------------------------------------------------------------------------
+
+
+def build_candidate_state(title: str, plot: str, candidates: list[dict]) -> dict:
     return {
-        "character": {"name": character},
+        "story": {"title": title, "plot": plot},
+        "candidates": [{"name": c["name"], "mentions": c["mentions"]} for c in candidates],
+    }
+
+
+def candidate_questions(count: int) -> dict:
+    """Two Nouls per candidate: is it a character, and does it drive the plot?"""
+    questions: dict = {}
+    for i in range(count):
+        who = f"`candidates[{i}].name`"
+        questions[f"is_character_{i}"] = Noul(
+            instructions=(
+                f"In `story.plot`, is {who} a character - a person, an animal, or a "
+                f"being that acts - rather than a place, a group, an object, or a title?"
+            ),
+            criteria=NoulCriteria(
+                true=f"{who} is an individual who acts, speaks, or has things happen to them",
+                false=(
+                    f"{who} is a place, a nation, an organization, a crowd, an object, "
+                    f"a species, or the title of the work"
+                ),
+            ),
+        )
+        questions[f"is_main_character_{i}"] = Noul(
+            instructions=(
+                f"Do the actions or the fate of {who} drive the events of `story.plot`?"
+            ),
+            criteria=NoulCriteria(
+                true=(
+                    f"What {who} does, wants, or suffers causes or shapes the events of the plot"
+                ),
+                false=(
+                    f"{who} appears but the plot would run much the same way without them"
+                ),
+            ),
+        )
+    return questions
+
+
+# ---------------------------------------------------------------------------
+# 2. Journey analysis: shared per segment + per character
+# ---------------------------------------------------------------------------
+
+
+def build_segment_state(names: list[str], index: int, text: str, previous: str) -> dict:
+    return {
+        "characters": [{"name": name} for name in names],
         "segment": {"index": index, "text": text},
         "context": {"previous_segment": previous},
     }
 
 
-QUESTIONS = {
-    "character_is_focal": Noul(
-        instructions=(
-            "Is `character.name` present in, or the focus of, `segment.text`? "
-            "Count pronouns and descriptions that clearly refer to `character.name`."
-        ),
-        criteria=NoulCriteria(
-            true="`character.name` appears in or is the focus of this passage",
-            false="The passage is about other people, places, or events while `character.name` is absent",
-        ),
-    ),
+# Asked once per segment: these are about the narration, not about a person.
+SHARED_QUESTIONS = {
     "sets_the_stage": Noul(
         instructions=(
             "Does `segment.text` mainly describe setting, background, or exposition "
@@ -64,17 +133,6 @@ QUESTIONS = {
         criteria=NoulCriteria(
             true="Opposing people or forces clash in this passage: argument, threat, fight, pursuit, struggle against danger",
             false="No clash is happening in this passage, even if one is remembered or expected",
-        ),
-    ),
-    "stakes_raised": Noul(
-        instructions=(
-            "Compared with `context.previous_segment`, does `segment.text` raise the stakes "
-            "for `character.name`? If `context.previous_segment` is empty, judge whether "
-            "`segment.text` already puts something important to `character.name` at risk."
-        ),
-        criteria=NoulCriteria(
-            true="New danger, loss, deadline, or consequence for `character.name` appears or grows",
-            false="The stakes stay the same or fall",
         ),
     ),
     "urgent_pacing": Noul(
@@ -127,54 +185,90 @@ QUESTIONS = {
             },
         ],
     ),
-    "narrated_feeling": Choice(
-        instructions={
-            "question": "What feeling does the narration of `segment.text` convey at this point in the story?",
-            "focus": (
-                "Judge the feeling the telling creates through word choice, imagery, and pacing, "
-                "not only what `character.name` says they feel. Use `context.previous_segment` "
-                "to tell whether tension is building or releasing."
-            ),
-        },
-        criteria={
-            "joy": {
-                "what": "Warmth, delight, triumph, lightness; the telling is bright and open",
-                "not_for": "Mere release of tension after danger with no real gladness (relief)",
-                "examples": [
-                    "Laughter spilled across the square as the lanterns went up.",
-                    "She held the trophy over her head and the whole crowd roared with her.",
-                ],
-            },
-            "rage": {
-                "what": "Anger, hostility, violent tension; the telling is hot, harsh, and aimed at someone",
-                "not_for": "Hopelessness or grief with no target to strike at (despair)",
-                "examples": [
-                    "He slammed the ledger shut. 'You lied to every one of us.'",
-                    "Her fists shook as the soldiers dragged her brother away.",
-                ],
-            },
-            "despair": {
-                "what": "Hopelessness, grief, dread, defeat; the telling is heavy, dark, and closing in",
-                "not_for": "Anger directed outward at an enemy (rage)",
-                "examples": [
-                    "There was no one left to call. The line rang and rang.",
-                    "The water kept rising, and every door she tried was locked.",
-                ],
-            },
-            "relief": {
-                "what": "Tension releasing, danger passing, calm after strain; the telling exhales",
-                "not_for": "Celebration or delight that goes beyond the easing of strain (joy)",
-                "examples": [
-                    "The footsteps faded down the hall, and he let himself breathe.",
-                    "When the fever broke at dawn, the room finally went quiet.",
-                ],
-            },
-        },
-    ),
 }
 
+SHARED_NOULS = ("sets_the_stage", "physical_action", "active_conflict", "urgent_pacing")
+# Asked once per character per segment, suffixed _0/_1/_2.
+PER_CHARACTER_NOULS = ("character_is_focal", "stakes_raised")
 
-def questions_fingerprint() -> str:
-    """Stable hash of the question definitions, used as part of the cache key."""
-    payload = {k: q.model_dump(mode="json") for k, q in sorted(QUESTIONS.items())}
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+
+def _per_character_questions(k: int) -> dict:
+    who = f"`characters[{k}].name`"
+    return {
+        f"character_is_focal_{k}": Noul(
+            instructions=(
+                f"Is {who} present in, or the focus of, `segment.text`? "
+                f"Count pronouns and descriptions that clearly refer to {who}."
+            ),
+            criteria=NoulCriteria(
+                true=f"{who} appears in or is the focus of this passage",
+                false=f"The passage is about other people, places, or events while {who} is absent",
+            ),
+        ),
+        f"stakes_raised_{k}": Noul(
+            instructions=(
+                f"Compared with `context.previous_segment`, does `segment.text` raise the stakes "
+                f"for {who}? If `context.previous_segment` is empty, judge whether "
+                f"`segment.text` already puts something important to {who} at risk."
+            ),
+            criteria=NoulCriteria(
+                true=f"New danger, loss, deadline, or consequence for {who} appears or grows",
+                false="The stakes stay the same or fall",
+            ),
+        ),
+        f"narrated_feeling_{k}": Choice(
+            instructions={
+                "question": (
+                    f"What feeling does the narration of `segment.text` convey around {who} "
+                    f"at this point?"
+                ),
+                "focus": (
+                    f"Judge the feeling the telling creates through word choice, imagery, and pacing, "
+                    f"not only what {who} says they feel. Use `context.previous_segment` "
+                    f"to tell whether tension is building or releasing."
+                ),
+            },
+            criteria={
+                "joy": {
+                    "what": "Warmth, delight, triumph, lightness; the telling is bright and open",
+                    "not_for": "Mere release of tension after danger with no real gladness (relief)",
+                    "examples": [
+                        "Laughter spilled across the square as the lanterns went up.",
+                        "She held the trophy over her head and the whole crowd roared with her.",
+                    ],
+                },
+                "rage": {
+                    "what": "Anger, hostility, violent tension; the telling is hot, harsh, and aimed at someone",
+                    "not_for": "Hopelessness or grief with no target to strike at (despair)",
+                    "examples": [
+                        "He slammed the ledger shut. 'You lied to every one of us.'",
+                        "Her fists shook as the soldiers dragged her brother away.",
+                    ],
+                },
+                "despair": {
+                    "what": "Hopelessness, grief, dread, defeat; the telling is heavy, dark, and closing in",
+                    "not_for": "Anger directed outward at an enemy (rage)",
+                    "examples": [
+                        "There was no one left to call. The line rang and rang.",
+                        "The water kept rising, and every door she tried was locked.",
+                    ],
+                },
+                "relief": {
+                    "what": "Tension releasing, danger passing, calm after strain; the telling exhales",
+                    "not_for": "Celebration or delight that goes beyond the easing of strain (joy)",
+                    "examples": [
+                        "The footsteps faded down the hall, and he let himself breathe.",
+                        "When the fever broke at dawn, the room finally went quiet.",
+                    ],
+                },
+            },
+        ),
+    }
+
+
+def segment_questions(count: int) -> dict:
+    """All questions for one segment: shared ones plus three per character."""
+    questions = dict(SHARED_QUESTIONS)
+    for k in range(count):
+        questions.update(_per_character_questions(k))
+    return questions

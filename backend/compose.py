@@ -2,26 +2,36 @@
 
 All policy lives here as plain code. Tune the constants below; changing them
 never re-calls the API, because raw answers are cached (see cache.py).
+
+Everything is computed per character. One segment's answers hold the shared
+narration judgments plus three suffixed answers per character, so `compose`
+takes the character's slot index `k` and reads `*_k` for the parts that are
+about that person: whether they are on stage, whether their stakes rose, and
+what the narration feels like around them.
 """
 
 from __future__ import annotations
 
 import colorsys
 
-from questions import ACTION_LEVELS, FEELINGS
+from questions import ACTION_LEVELS, FEELINGS, SHARED_NOULS
 
 # ---------------------------------------------------------------------------
 # Tunable weights and thresholds
 # ---------------------------------------------------------------------------
 
 # Intensity is a weighted sum of signals, each already on 0..1. Weights sum to 1.
+# The first three and the last are shared by every character in a segment; the
+# other two are that character's own answers, which is what makes three lines
+# out of one set of requests.
 INTENSITY_WEIGHTS = {
-    "action_intensity": 0.40,  # Score, normalized by (levels - 1)
-    "physical_action": 0.15,   # Noul
-    "active_conflict": 0.15,   # Noul
-    "stakes_raised": 0.10,     # Noul
-    "urgent_pacing": 0.10,     # Noul
-    "pacing_features": 0.10,   # deterministic narration features (below)
+    "action_intensity": 0.34,    # Score, normalized by (levels - 1)   shared
+    "physical_action": 0.13,     # Noul                                shared
+    "active_conflict": 0.13,     # Noul                                shared
+    "character_is_focal": 0.12,  # Noul                                per character
+    "stakes_raised": 0.10,       # Noul                                per character
+    "urgent_pacing": 0.09,       # Noul                                shared
+    "pacing_features": 0.09,     # deterministic narration features    shared
 }
 
 # How the deterministic pacing features combine into one 0..1 signal.
@@ -40,7 +50,10 @@ STAGE_SETTING_THRESHOLD = 0.7   # sets_the_stage probability at or above this...
 STAGE_LOW_INTENSITY = 0.35      # ...and intensity below this...
 STAGE_CLAMPED_INTENSITY = 0.03  # ...clamps intensity to this value.
 
-# Offstage: character_is_focal below this fades the segment.
+# Offstage: character_is_focal below this fades the segment. Focal status also
+# carries a weight in INTENSITY_WEIGHTS above, so a character who is absent
+# both dips and fades - the line drops away instead of tracking someone else's
+# scene at full height.
 FOCAL_THRESHOLD = 0.5
 OFFSTAGE_OPACITY = 0.3
 
@@ -106,25 +119,31 @@ def feeling_color(probabilities: dict[str, float], choice: str, confidence: floa
     return _rgb_to_hex(colorsys.hls_to_rgb(h, l, s))
 
 
-def compose(answers: dict, features: dict) -> dict:
-    """answers: raw per-question answer dicts (as returned by the API)."""
-    nouls = {k: answers[k]["noul"] for k in (
-        "character_is_focal", "sets_the_stage", "physical_action",
-        "active_conflict", "stakes_raised", "urgent_pacing",
-    )}
+def compose(answers: dict, features: dict, k: int = 0) -> dict:
+    """Chart values for character slot `k` in one segment.
+
+    answers: raw per-question answer dicts (as returned by the API), holding
+    the shared questions plus `character_is_focal_k`, `stakes_raised_k` and
+    `narrated_feeling_k`.
+    """
+    nouls = {name: answers[name]["noul"] for name in SHARED_NOULS}
+    nouls["character_is_focal"] = answers[f"character_is_focal_{k}"]["noul"]
+    nouls["stakes_raised"] = answers[f"stakes_raised_{k}"]["noul"]
+
     action = answers["action_intensity"]
-    feeling = answers["narrated_feeling"]
+    feeling = answers[f"narrated_feeling_{k}"]
     pacing = pacing_signal(features)
 
     signals = {
         "action_intensity": action["score"] / (ACTION_LEVELS - 1),
         "physical_action": nouls["physical_action"],
         "active_conflict": nouls["active_conflict"],
+        "character_is_focal": nouls["character_is_focal"],
         "stakes_raised": nouls["stakes_raised"],
         "urgent_pacing": nouls["urgent_pacing"],
         "pacing_features": pacing["value"],
     }
-    raw_intensity = sum(INTENSITY_WEIGHTS[k] * v for k, v in signals.items())
+    raw_intensity = sum(INTENSITY_WEIGHTS[key] * value for key, value in signals.items())
     stage_clamped = (
         nouls["sets_the_stage"] >= STAGE_SETTING_THRESHOLD and raw_intensity < STAGE_LOW_INTENSITY
     )
@@ -135,7 +154,7 @@ def compose(answers: dict, features: dict) -> dict:
         "intensity": round(_clip(intensity), 4),
         "raw_intensity": round(_clip(raw_intensity), 4),
         "stage_clamped": stage_clamped,
-        "intensity_signals": {k: round(v, 4) for k, v in signals.items()},
+        "intensity_signals": {key: round(value, 4) for key, value in signals.items()},
         "pacing": pacing,
         "intensity_uncertain": action["confidence"] < INTENSITY_CONFIDENCE_THRESHOLD,
         "offstage": offstage,

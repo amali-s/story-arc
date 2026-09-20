@@ -148,6 +148,82 @@ button:disabled { opacity: 0.5; cursor: progress; }
 .feeling-keys span { display: inline-flex; align-items: center; gap: 4px; }
 .feeling-keys i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 
+/* Tabs ---------------------------------------------------------------- */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.tabs button {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  padding: 8px 10px;
+  font: 600 13px var(--font);
+}
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+
+/* Search -------------------------------------------------------------- */
+.search-row { display: flex; gap: 8px; align-items: stretch; }
+.search-row input { flex: 1; min-width: 0; }
+.search-row button { flex: none; white-space: nowrap; }
+.hint { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+
+.results { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow-y: auto; }
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 9px 11px;
+  font-weight: 400;
+}
+.result:hover { border-color: var(--muted); }
+.result.chosen { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.r-title { font-weight: 600; font-size: 14px; }
+.r-meta { color: var(--muted); font-size: 12px; }
+
+/* Stage indicator ------------------------------------------------------ */
+.stages { list-style: none; margin: 14px 0 0; padding: 12px 0 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+.stages:empty { display: none; }
+.stages li { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.stages .tick { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line); flex: none; }
+.stages .detail { margin-left: auto; font-size: 11.5px; text-align: right; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stages [data-state="active"] { color: var(--ink); }
+.stages [data-state="active"] .tick { border-color: var(--relief); border-right-color: transparent; animation: spin 0.7s linear infinite; }
+.stages [data-state="done"] { color: var(--ink); }
+.stages [data-state="done"] .tick { background: var(--relief); border-color: var(--relief); }
+.stages [data-state="error"] { color: var(--rage); }
+.stages [data-state="error"] .tick { background: var(--rage); border-color: var(--rage); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .stages [data-state="active"] .tick { animation: none; border-color: var(--relief); }
+}
+
+/* Source line, character toggle ---------------------------------------- */
+.source { font-size: 12.5px; color: var(--muted); margin: 4px 0 0; }
+.source a { color: var(--ink); }
+.note-line { font-size: 12.5px; color: var(--ink); background: var(--grid); border-radius: 8px; padding: 7px 10px; margin: 10px 0 0; }
+
+.toggle { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 6px 12px;
+  font-weight: 400;
+}
+.chip:hover { border-color: var(--muted); }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.chip-name { font-weight: 600; font-size: 13.5px; }
+.chip-meta { font-size: 11px; opacity: 0.7; }
+
 .tooltip {
   position: fixed;
   z-index: 10;

@@ -1,8 +1,14 @@
-"""SQLite cache of raw System One answers, keyed by everything that affects them.
+"""SQLite cache, keyed by everything that affects what is cached.
 
-The key hashes the exact state, the question definitions, and the model name,
-so editing a question or a segment (or the one before it) misses the cache,
-while tuning composition constants never does.
+Two tables:
+
+* `answers` - raw System One answers. The key hashes the exact state, the
+  question definitions, and the model name, so editing a question or a segment
+  (or the one before it) misses the cache, while tuning composition constants
+  never does.
+* `documents` - retrieved plot summaries and confirmed character lists, keyed
+  by article id. Wikipedia articles do get edited, and nothing here expires:
+  delete `.cache/` to re-fetch.
 """
 
 from __future__ import annotations
@@ -22,6 +28,9 @@ class AnswerCache:
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS answers (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
         )
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS documents (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
         self._db.commit()
 
     @staticmethod
@@ -36,5 +45,16 @@ class AnswerCache:
     def put(self, key: str, value: dict) -> None:
         self._db.execute(
             "INSERT OR REPLACE INTO answers (key, value) VALUES (?, ?)", (key, json.dumps(value))
+        )
+        self._db.commit()
+
+    def get_document(self, key: str) -> dict | None:
+        row = self._db.execute("SELECT value FROM documents WHERE key = ?", (key,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def put_document(self, key: str, value: dict) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO documents (key, value) VALUES (?, ?)",
+            (key, json.dumps(value)),
         )
         self._db.commit()

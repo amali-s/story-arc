@@ -1,4 +1,5 @@
-// An original sample story for the demo. Character to track: Mara.
+// An original sample story for the demo. Characters are now detected from the
+// text itself, so no character needs to be named up front.
 window.SAMPLE_CHARACTER = "Mara";
 window.SAMPLE_STORY = `The island of Kell sat at the edge of the northern charts, a crooked thumb of granite with one village, one harbor, and one lighthouse. The lighthouse was older than anyone living. Its stairs numbered one hundred and twelve, and its lamp had burned every night for ninety years, fed by oil that came over on the supply boat each spring.
 

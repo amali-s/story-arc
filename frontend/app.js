@@ -2,61 +2,63 @@
 // all policy (intensity, color, thresholds) is composed server-side in compose.py.
 
 const FEELINGS = ["joy", "rage", "despair", "relief"];
-const NOULS = [
-  ["character_is_focal", "Character focal"],
-  ["sets_the_stage", "Sets the stage"],
-  ["physical_action", "Physical action"],
-  ["active_conflict", "Active conflict"],
-  ["stakes_raised", "Stakes raised"],
-  ["urgent_pacing", "Urgent pacing"],
+const STAGES = [
+  ["search", "Searching Wikipedia"],
+  ["plot", "Fetching the plot summary"],
+  ["characters", "Finding the main characters"],
+  ["journeys", "Analyzing segments"],
 ];
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 const $ = (id) => document.getElementById(id);
-const form = $("form");
 const statusEl = $("status");
 const chartEl = $("chart");
 const tooltip = $("tooltip");
+
 let current = null; // last analysis, kept so resizes re-render without refetching
+let active = 0; // which character's journey is drawn
+let busy = false;
+
+// ---------------------------------------------------------------------------
+// Tabs
+// ---------------------------------------------------------------------------
+
+function selectTab(which) {
+  const isSearch = which === "search";
+  $("tab-search").setAttribute("aria-selected", String(isSearch));
+  $("tab-text").setAttribute("aria-selected", String(!isSearch));
+  $("pane-search").hidden = !isSearch;
+  $("pane-text").hidden = isSearch;
+}
+$("tab-search").addEventListener("click", () => selectTab("search"));
+$("tab-text").addEventListener("click", () => selectTab("text"));
 
 $("sample").addEventListener("click", () => {
-  $("character").value = window.SAMPLE_CHARACTER;
+  $("title").value = "The Keeper of Kell";
   $("story").value = window.SAMPLE_STORY;
 });
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const story = $("story").value;
-  const character = $("character").value.trim();
-  if (!story.trim() || !character) return;
+// ---------------------------------------------------------------------------
+// Stage indicator
+// ---------------------------------------------------------------------------
 
-  $("analyze").disabled = true;
-  setStatus("Asking System One about each segment…");
-  try {
-    const res = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ story, character }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(errorText(body) || `Request failed (${res.status})`);
-    current = body;
-    render();
-    const n = body.points.length;
-    setStatus(
-      `${n} segment${n === 1 ? "" : "s"} · ${body.api_calls} new System One call${body.api_calls === 1 ? "" : "s"}, ${n - body.api_calls} from cache`
-    );
-  } catch (err) {
-    setStatus(err.message, true);
-  } finally {
-    $("analyze").disabled = false;
-  }
-});
+function resetStages(skip = []) {
+  $("stages").replaceChildren(
+    ...STAGES.filter(([id]) => !skip.includes(id)).map(([id, label]) => {
+      const li = document.createElement("li");
+      li.dataset.stage = id;
+      li.dataset.state = "pending";
+      li.innerHTML = `<span class="tick" aria-hidden="true"></span><span class="what">${label}</span><span class="detail"></span>`;
+      return li;
+    })
+  );
+}
 
-function errorText(body) {
-  if (typeof body.detail === "string") return body.detail;
-  if (Array.isArray(body.detail)) return body.detail.map((d) => d.msg).join("; ");
-  return "";
+function setStage(id, state, detail = "") {
+  const li = $("stages").querySelector(`[data-stage="${id}"]`);
+  if (!li) return;
+  li.dataset.state = state;
+  li.querySelector(".detail").textContent = detail;
 }
 
 function setStatus(text, isError = false) {
@@ -64,11 +66,187 @@ function setStatus(text, isError = false) {
   statusEl.classList.toggle("error", isError);
 }
 
-let resizeFrame = 0;
-new ResizeObserver(() => {
-  cancelAnimationFrame(resizeFrame);
-  resizeFrame = requestAnimationFrame(() => current && render());
-}).observe(chartEl);
+function failStage(id, message) {
+  setStage(id, "error");
+  setStatus(message, true);
+}
+
+// ---------------------------------------------------------------------------
+// API
+// ---------------------------------------------------------------------------
+
+function errorText(body) {
+  if (typeof body.detail === "string") return body.detail;
+  if (Array.isArray(body.detail)) return body.detail.map((d) => d.msg).join("; ");
+  return "";
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(errorText(body) || `Request failed (${res.status})`);
+  return body;
+}
+
+const post = (path, source) =>
+  api(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(source),
+  });
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+$("search-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const query = $("query").value.trim();
+  if (!query || busy) return;
+
+  busy = true;
+  $("search-btn").disabled = true;
+  $("results").replaceChildren();
+  resetStages();
+  setStage("search", "active");
+  setStatus("");
+  try {
+    const body = await api(`/api/search?q=${encodeURIComponent(query)}`);
+    if (!body.results.length) {
+      failStage("search", `No Wikipedia articles found for “${query}”. Try a different title.`);
+      return;
+    }
+    setStage("search", "done", `${body.results.length} results`);
+    showResults(body.results);
+    setStatus("Pick the article that matches the story you mean.");
+  } catch (err) {
+    failStage("search", err.message);
+  } finally {
+    busy = false;
+    $("search-btn").disabled = false;
+  }
+});
+
+function showResults(results) {
+  $("results").replaceChildren(
+    ...results.map((r) => {
+      const li = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "result";
+      // A year with no media type ("1966") reads as noise, so the compact form
+      // needs a type; otherwise fall back to the raw short description. Only
+      // the type is capitalized: a fallback description is a sentence, and
+      // title-casing it gives "Character In The Novel The Great Gatsby".
+      const kind = r.media_type
+        ? [r.media_type[0].toUpperCase() + r.media_type.slice(1), r.year].filter(Boolean).join(" · ")
+        : r.description;
+      button.innerHTML = `<span class="r-title">${esc(r.title)}</span>
+        ${kind ? `<span class="r-meta">${esc(kind)}</span>` : ""}`;
+      button.addEventListener("click", () => {
+        $("results").querySelectorAll(".result").forEach((b) => b.classList.remove("chosen"));
+        button.classList.add("chosen");
+        run({ kind: "wikipedia", pageid: r.pageid }, ["search"]);
+      });
+      li.appendChild(button);
+      return li;
+    })
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Paste-text path
+// ---------------------------------------------------------------------------
+
+$("analyze").addEventListener("click", () => {
+  const story = $("story").value;
+  if (!story.trim() || busy) return;
+  run({ kind: "text", story, title: $("title").value.trim() || "Pasted text" }, ["search"]);
+});
+
+// ---------------------------------------------------------------------------
+// Pipeline: plot -> characters -> journeys, one stage at a time
+// ---------------------------------------------------------------------------
+
+async function run(source, skip) {
+  busy = true;
+  $("analyze").disabled = true;
+  $("search-btn").disabled = true;
+  resetStages(skip);
+  setStatus("");
+
+  try {
+    setStage("plot", "active");
+    const doc = await post("/api/plot", source);
+    setStage("plot", "done", `${doc.segments.length} segments`);
+
+    setStage("characters", "active");
+    const found = await post("/api/characters", source);
+    setStage("characters", "done", found.characters.map((c) => c.name).join(", "));
+
+    setStage("journeys", "active");
+    const body = await post("/api/journeys", source);
+    setStage("journeys", "done", `${body.points.length} segments`);
+
+    current = body;
+    active = 0;
+    renderAll();
+
+    const n = body.points.length;
+    const calls = body.api_calls;
+    setStatus(
+      `${n} segment${n === 1 ? "" : "s"} × ${body.characters.length} characters · ` +
+        `${calls} new System One call${calls === 1 ? "" : "s"}, ${n + 1 - calls} from cache`
+    );
+  } catch (err) {
+    const stage = $("stages").querySelector('[data-state="active"]');
+    failStage(stage ? stage.dataset.stage : "journeys", err.message);
+  } finally {
+    busy = false;
+    $("analyze").disabled = false;
+    $("search-btn").disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Header, source line, character toggle
+// ---------------------------------------------------------------------------
+
+function renderAll() {
+  const { characters, document: doc, note } = current;
+
+  const source = $("source");
+  source.innerHTML = doc.url
+    ? `Plot summary from <a href="${esc(doc.url)}" target="_blank" rel="noopener noreferrer">${esc(doc.title)}</a>
+       · section “${esc(doc.section)}” · ${esc(doc.attribution)}`
+    : `Pasted text · ${doc.segments.length} paragraphs`;
+  source.hidden = false;
+
+  const noteEl = $("note");
+  noteEl.textContent = note || "";
+  noteEl.hidden = !note;
+
+  const toggle = $("toggle");
+  toggle.replaceChildren(
+    ...characters.map((c, k) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "chip";
+      button.setAttribute("aria-pressed", String(k === active));
+      button.innerHTML = `<span class="chip-name">${esc(c.name)}</span><span class="chip-meta">${c.mentions} mentions</span>`;
+      button.title =
+        `is a character ${c.is_character.toFixed(2)} · drives the plot ${c.is_main_character.toFixed(2)} · rank score ${c.score.toFixed(2)}`;
+      button.addEventListener("click", () => {
+        active = k;
+        renderAll();
+      });
+      return button;
+    })
+  );
+  toggle.hidden = false;
+
+  render();
+}
 
 // ---------------------------------------------------------------------------
 // Chart
@@ -122,9 +300,14 @@ function splitPiece(x0, y0, x1, y1, m0, m1) {
   ];
 }
 
+// The composed values for the character currently shown.
+const shown = (point) => point.composed[active];
+
 function render() {
-  const { points, character } = current;
-  $("chart-title").textContent = `${character}'s journey`;
+  if (!current) return;
+  const { points, characters } = current;
+  const who = characters[active].name;
+  $("chart-title").textContent = `${who}'s journey`;
   const models = [...new Set(points.map((p) => p.model))].join(", ");
   $("meta").textContent = `${points.length} segments · model ${models}`;
 
@@ -141,7 +324,7 @@ function render() {
   tooltip.hidden = true;
   chartEl.replaceChildren();
   const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, role: "img",
-    "aria-label": `Line chart of ${character}'s action intensity across ${n} story segments` });
+    "aria-label": `Line chart of ${who}'s action intensity across ${n} story segments` });
   chartEl.appendChild(svg);
   const defs = el("defs", {}, svg);
 
@@ -170,7 +353,7 @@ function render() {
   // Line: each piece i→i+1 is split at its midpoint so the half nearest a point
   // takes that point's dash and opacity; color is a gradient between the two.
   const xs = points.map((_, i) => xAt(i));
-  const ys = points.map((p) => yAt(p.composed.intensity));
+  const ys = points.map((p) => yAt(shown(p).intensity));
   const line = el("g", { fill: "none", "stroke-width": 3.5, "stroke-linecap": "round" }, svg);
   if (n > 1) {
     const m = monotoneTangents(xs, ys);
@@ -178,11 +361,11 @@ function render() {
       const gid = `g${i}`;
       const g = el("linearGradient", { id: gid, gradientUnits: "userSpaceOnUse",
         x1: xs[i], x2: xs[i + 1], y1: 0, y2: 0 }, defs);
-      el("stop", { offset: "0", "stop-color": points[i].composed.color }, g);
-      el("stop", { offset: "1", "stop-color": points[i + 1].composed.color }, g);
+      el("stop", { offset: "0", "stop-color": shown(points[i]).color }, g);
+      el("stop", { offset: "1", "stop-color": shown(points[i + 1]).color }, g);
       const halves = splitPiece(xs[i], ys[i], xs[i + 1], ys[i + 1], m[i], m[i + 1]);
       [i, i + 1].forEach((owner, h) => {
-        const c = points[owner].composed;
+        const c = shown(points[owner]);
         el("path", { d: halves[h], stroke: `url(#${gid})`, "stroke-opacity": c.opacity,
           "stroke-dasharray": c.intensity_uncertain ? "6 6" : "none" }, line);
       });
@@ -192,12 +375,12 @@ function render() {
   // Guide, dots, and hover/focus targets
   const guide = el("line", { class: "guide", y1: pad.top, y2: pad.top + plotH }, svg);
   const dots = points.map((p, i) =>
-    el("circle", { class: "dot", cx: xs[i], cy: ys[i], r: 5, fill: p.composed.color,
-      "fill-opacity": p.composed.opacity }, svg));
+    el("circle", { class: "dot", cx: xs[i], cy: ys[i], r: 5, fill: shown(p).color,
+      "fill-opacity": shown(p).opacity }, svg));
   const colW = n === 1 ? plotW : plotW / (n - 1);
   points.forEach((p, i) => {
     const hit = el("rect", { class: "hit", x: xs[i] - colW / 2, y: pad.top, width: colW,
-      height: plotH, tabindex: 0, "aria-label": ariaFor(p) }, svg);
+      height: plotH, tabindex: 0, "aria-label": ariaFor(p, who) }, svg);
     const show = () => {
       guide.setAttribute("x1", xs[i]); guide.setAttribute("x2", xs[i]);
       guide.classList.add("on"); dots[i].classList.add("on");
@@ -211,21 +394,23 @@ function render() {
   });
 }
 
-function topFeeling(p) {
-  return p.answers.narrated_feeling.choice;
-}
+let resizeFrame = 0;
+new ResizeObserver(() => {
+  cancelAnimationFrame(resizeFrame);
+  resizeFrame = requestAnimationFrame(() => current && render());
+}).observe(chartEl);
 
-function ariaFor(p) {
-  const f = p.answers.narrated_feeling;
-  return `Segment ${p.index + 1}: intensity ${p.composed.intensity.toFixed(2)}, feeling ${f.choice} at confidence ${f.confidence.toFixed(2)}`;
+function ariaFor(p, who) {
+  const f = p.answers[`narrated_feeling_${active}`];
+  return `Segment ${p.index + 1} for ${who}: intensity ${shown(p).intensity.toFixed(2)}, feeling ${f.choice} at confidence ${f.confidence.toFixed(2)}`;
 }
 
 // ---------------------------------------------------------------------------
-// Tooltip: why TypeSafe scored the point this way
+// Tooltip: why TypeSafe scored the point this way, for this character
 // ---------------------------------------------------------------------------
 
 const pct = (v) => `${Math.round(v * 100)}%`;
-const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
 function row(label, value, display, isTop = false) {
   return `<div class="row${isTop ? " is-top" : ""}"><span>${label}</span>
@@ -234,9 +419,9 @@ function row(label, value, display, isTop = false) {
 }
 
 function showTooltip(p, anchor) {
-  const c = p.composed;
-  const feel = p.answers.narrated_feeling;
-  const act = p.answers.action_intensity;
+  const c = shown(p);
+  const who = current.characters[active].name;
+  const feel = p.answers[`narrated_feeling_${active}`];
   const excerpt = p.text.length > 220 ? `${p.text.slice(0, 220).trimEnd()}…` : p.text;
   const tags = [
     c.stage_clamped && "stage-setting",
@@ -246,23 +431,13 @@ function showTooltip(p, anchor) {
 
   tooltip.innerHTML = `
     <div class="tt-head"><span class="tt-swatch" style="background:${c.color}"></span>
-      Segment ${p.index + 1}<div class="tt-tags">${tags}</div></div>
+      Segment ${p.index + 1} · ${esc(who)}<div class="tt-tags">${tags}</div></div>
     <p class="tt-excerpt">“${esc(excerpt)}”</p>
 
-    <div class="tt-section"><h4><span>Feeling in the narration</span><span>confidence ${feel.confidence.toFixed(2)}</span></h4>
+    <div class="tt-section"><h4><span>Feeling around ${esc(who)}</span><span>confidence ${feel.confidence.toFixed(2)}</span></h4>
       ${FEELINGS.map((f) => row(
         `<i class="key" data-feeling="${f}"></i>${f}`,
-        feel.probabilities[f] ?? 0, pct(feel.probabilities[f] ?? 0), f === topFeeling(p))).join("")}
-    </div>
-
-    <div class="tt-section"><h4><span>Intensity</span><span>${c.intensity.toFixed(2)}</span></h4>
-      ${row("Action score", act.score / 4, `${act.score.toFixed(2)}/4`)}
-      <div class="note">Action score confidence ${act.confidence.toFixed(2)}${c.intensity_uncertain ? " (below threshold, shown dashed)" : ""}.
-      ${c.stage_clamped ? ` Flattened from ${c.raw_intensity.toFixed(2)} because the passage mainly sets the stage.` : ""}</div>
-    </div>
-
-    <div class="tt-section"><h4><span>Yes/no judgments (Noul)</span><span>P(yes)</span></h4>
-      ${NOULS.map(([k, label]) => row(label, p.answers[k].noul, p.answers[k].noul.toFixed(2))).join("")}
+        feel.probabilities[f] ?? 0, pct(feel.probabilities[f] ?? 0), f === feel.choice)).join("")}
     </div>
 
     <div class="note">Pacing features (code): avg sentence ${p.features.avg_sentence_length} words,
