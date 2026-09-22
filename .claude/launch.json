@@ -3,9 +3,10 @@
   "configurations": [
     {
       "name": "story-arc",
-      "runtimeExecutable": ".venv/bin/uvicorn",
-      "runtimeArgs": ["app:app", "--app-dir", "backend", "--port", "8000"],
-      "port": 8000
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "exec .venv/bin/uvicorn app:app --app-dir backend --port ${PORT:-8000}"],
+      "port": 8000,
+      "autoPort": true
     }
   ]
 }

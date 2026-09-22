@@ -6,7 +6,7 @@ single chart with a character toggle.
 
 - **Height and shape** of the line show action intensity.
 - **Color** shows the feeling TypeSafe reads in the narration: joy (yellow), rage (red), despair (purple), relief (blue).
-- **Brightness** shows how sure it is. **Dashed** means uncertain intensity. **Faded** means the character is offstage.
+- **Dashed** means uncertain intensity. The tooltip on each point shows how sure TypeSafe is and whether the character is offstage.
 
 It shows TypeSafe System One's "code in control" pattern, and leans on it harder than the
 usual demo does. **System One does not search and does not count.** The docs are explicit:
@@ -117,16 +117,15 @@ Every stage is cached, so later stages re-derive earlier ones for free.
    - If `sets_the_stage >= 0.7` and intensity is below `0.35`, intensity is clamped to
      `0.03`, which draws a flat line.
    - `color` blends the four feeling colors by that character's Choice `probabilities`.
-     Its saturation is then scaled by `narrated_feeling.confidence`.
-   - If that character's `character_is_focal < 0.5`, the segment is offstage: opacity 0.3.
-     Focal status also carries an intensity weight, so an absent character both dips and
-     fades rather than tracking someone else's scene at full height.
+   - If that character's `character_is_focal < 0.5`, the segment is flagged offstage
+     (shown in the tooltip). Focal status also carries an intensity weight, so an absent
+     character dips rather than tracking someone else's scene at full height.
    - If `action_intensity.confidence < 0.6`, the segment's intensity is uncertain and drawn
      dashed. This is shared, so it is the same on all three lines.
 
 8. **Chart** (`app.js`): monotone cubic (Fritsch–Carlson) interpolation. It's smooth but
    never overshoots, so flat stretches stay flat and sudden jumps stay sharp. Each point's
-   half of the line takes that point's dash and opacity; color is a gradient between
+   half of the line takes that point's dash; color is a gradient between
    neighboring points. The character buttons swap which `composed[k]` is drawn — no refetch.
    Hovering (or tabbing to) a point shows its excerpt, any flags on it (stage-setting,
    uncertain intensity, offstage), that character's four feeling probabilities with
@@ -145,7 +144,7 @@ editing.
 
 | File | Constants |
 | --- | --- |
-| [`backend/compose.py`](backend/compose.py) | `INTENSITY_WEIGHTS`, `PACING_FEATURE_WEIGHTS`, `BREVITY_SHORT_WORDS`, `BREVITY_LONG_WORDS`, `STAGE_SETTING_THRESHOLD`, `STAGE_LOW_INTENSITY`, `STAGE_CLAMPED_INTENSITY`, `FOCAL_THRESHOLD`, `OFFSTAGE_OPACITY`, `INTENSITY_CONFIDENCE_THRESHOLD`, `FEELING_COLORS`, `MIN_SATURATION_FACTOR`, `BLEND_BY_PROBABILITIES` |
+| [`backend/compose.py`](backend/compose.py) | `INTENSITY_WEIGHTS`, `PACING_FEATURE_WEIGHTS`, `BREVITY_SHORT_WORDS`, `BREVITY_LONG_WORDS`, `STAGE_SETTING_THRESHOLD`, `STAGE_LOW_INTENSITY`, `STAGE_CLAMPED_INTENSITY`, `FOCAL_THRESHOLD`, `INTENSITY_CONFIDENCE_THRESHOLD`, `FEELING_COLORS`, `BLEND_BY_PROBABILITIES` |
 | [`backend/characters.py`](backend/characters.py) | `MAX_CANDIDATES`, `TOP_CHARACTERS`, `IS_CHARACTER_THRESHOLD`, `RANK_WEIGHTS`, `_HONORIFICS`, `_STOPWORDS`, `_NON_NAMES` |
 | [`backend/story.py`](backend/story.py) | `SENTENCES_PER_SEGMENT`, `MIN_TRAILING_SENTENCES`, `MIN_SEGMENT_WORDS`, `SHORT_SENTENCE_WORDS`, `MAX_STORY_CHARS`, `MAX_SEGMENTS` |
 | [`backend/wiki.py`](backend/wiki.py) | `PLOT_SECTION_TITLES`, `SEARCH_LIMIT`, `MAX_PLOT_CHARS`, `REQUEST_TIMEOUT`, `CONTACT` |

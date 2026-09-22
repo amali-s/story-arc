@@ -12,7 +12,6 @@ what the narration feels like around them.
 
 from __future__ import annotations
 
-import colorsys
 
 from questions import ACTION_LEVELS, FEELINGS, SHARED_NOULS
 
@@ -50,12 +49,11 @@ STAGE_SETTING_THRESHOLD = 0.7   # sets_the_stage probability at or above this...
 STAGE_LOW_INTENSITY = 0.35      # ...and intensity below this...
 STAGE_CLAMPED_INTENSITY = 0.03  # ...clamps intensity to this value.
 
-# Offstage: character_is_focal below this fades the segment. Focal status also
-# carries a weight in INTENSITY_WEIGHTS above, so a character who is absent
-# both dips and fades - the line drops away instead of tracking someone else's
-# scene at full height.
+# Offstage: character_is_focal below this flags the segment (shown in the
+# tooltip). Focal status also carries a weight in INTENSITY_WEIGHTS above, so a
+# character who is absent dips - the line drops away instead of tracking
+# someone else's scene at full height.
 FOCAL_THRESHOLD = 0.5
-OFFSTAGE_OPACITY = 0.3
 
 # Uncertain intensity: action_intensity confidence below this -> dashed line.
 INTENSITY_CONFIDENCE_THRESHOLD = 0.6
@@ -67,8 +65,6 @@ FEELING_COLORS = {
     "despair": "#7b3fbf",  # purple
     "relief": "#2f7fe0",   # blue
 }
-# Saturation scale by feeling confidence: MIN at confidence 0, 1.0 at confidence 1.
-MIN_SATURATION_FACTOR = 0.12
 # Blend by the full probability distribution (True) or use only the top choice.
 BLEND_BY_PROBABILITIES = True
 
@@ -104,7 +100,7 @@ def _rgb_to_hex(rgb: tuple[float, float, float]) -> str:
     return "#" + "".join(f"{round(_clip(c) * 255):02x}" for c in rgb)
 
 
-def feeling_color(probabilities: dict[str, float], choice: str, confidence: float) -> str:
+def feeling_color(probabilities: dict[str, float], choice: str) -> str:
     if BLEND_BY_PROBABILITIES:
         weights = {f: probabilities.get(f, 0.0) for f in FEELINGS}
     else:
@@ -114,9 +110,7 @@ def feeling_color(probabilities: dict[str, float], choice: str, confidence: floa
     for feeling, w in weights.items():
         for i, c in enumerate(_hex_to_rgb(FEELING_COLORS[feeling])):
             rgb[i] += c * w / total
-    h, l, s = colorsys.rgb_to_hls(*rgb)
-    s *= MIN_SATURATION_FACTOR + (1 - MIN_SATURATION_FACTOR) * _clip(confidence)
-    return _rgb_to_hex(colorsys.hls_to_rgb(h, l, s))
+    return _rgb_to_hex(tuple(rgb))
 
 
 def compose(answers: dict, features: dict, k: int = 0) -> dict:
@@ -158,11 +152,10 @@ def compose(answers: dict, features: dict, k: int = 0) -> dict:
         "pacing": pacing,
         "intensity_uncertain": action["confidence"] < INTENSITY_CONFIDENCE_THRESHOLD,
         "offstage": offstage,
-        "opacity": OFFSTAGE_OPACITY if offstage else 1.0,
-        "color": feeling_color(feeling["probabilities"], feeling["choice"], feeling["confidence"]),
+        "color": feeling_color(feeling["probabilities"], feeling["choice"]),
     }
 
 
 def display_config() -> dict:
     """Constants the frontend needs for the legend."""
-    return {"feeling_colors": FEELING_COLORS, "offstage_opacity": OFFSTAGE_OPACITY}
+    return {"feeling_colors": FEELING_COLORS}
